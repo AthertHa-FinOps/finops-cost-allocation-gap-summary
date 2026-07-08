@@ -1,20 +1,23 @@
-# FinOps Case Study: AWS Cost Allocation Gap and Governance Remediation
+# Cloud Governance Case Study: AWS Tag Compliance Investigation & Detection Pipeline
 
-**Restored 100% cost allocation visibility after a 17% attribution gap in AWS billing data.** Cloud billing analyst with 14 years in financial 
-controls and audit, applied to a cloud cost attribution failure using AWS-native forensic and governance tooling.
+> **Project context:** This is a self-directed learning project completed in a personal AWS
+> sandbox account — not a professional engagement, paid consulting work, or output of a prior
+> employer. Cost figures are intentionally lab-scaled ($315 in total spend) so the investigation
+> methodology could be tested end to end without financial risk. The forensic technique, SQL
+> patterns, and governance reasoning are written to map directly onto enterprise environments
+> regardless of spend volume.
+
+**Restored 100% tag compliance visibility after tracing a provisioning-time governance gap to its root cause.** Applying 13+ years of reconciliation, audit-readiness, and multi-party compliance coordination from regulated real estate transactions to a cloud governance investigation using AWS-native forensic and detection tooling.
 
 ---
 
 ## The 30-Second Version
 
 - Identified a 17% cost allocation gap where $53 of $315 in monthly spend was invisible to Finance chargeback reporting
-- Proved root cause at creation time using CUR and CloudTrail `tagSpecificationSet` evidence. Tags were never submitted with the API call,
-confirming a provisioning time control failure rather than post creation drift
-- Isolated failure to console based provisioning outside governance controls, confirmed via IAM principal, UserAgent string, and session
-attribution chain
-- Built an event driven detection pipeline using CloudTrail, EventBridge, and Lambda with EC2 and S3 branching logic
-- Restored 100% allocation coverage and reduced detection time from 30 days to low minute-level under normal conditions
-- Coordinated remediation approach with Finance stakeholders to align on tagging standards, reporting thresholds, and chargeback sequencing
+- Proved root cause at creation time using CUR and CloudTrail `tagSpecificationSet` evidence — tags were never submitted with the API call, confirming a provisioning-time control failure rather than post-creation drift
+- Traced the gap to console-based provisioning outside governance controls, confirmed via IAM principal, UserAgent string, and session attribution chain
+- Designed an event-driven detection pipeline (CloudTrail → EventBridge → Lambda) with EC2 and S3 branching logic
+- Documented the full control-selection rationale, failure modes, and progressive enforcement roadmap as a governance case study
 
 ---
 
