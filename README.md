@@ -1,23 +1,26 @@
 # Cloud Governance Case Study: AWS Tag Compliance Investigation & Detection Pipeline
 
-> **Project context:** This is a self-directed learning project completed in a personal AWS
-> sandbox account — not a professional engagement, paid consulting work, or output of a prior
-> employer. Cost figures are intentionally lab-scaled ($315 in total spend) so the investigation
+> **Project context:** This is a self directed learning project completed in a personal AWS
+> sandbox account. It is not a professional engagement, paid consulting work, or output of a prior
+> employer. Cost figures are intentionally lab scaled ($315 in total spend) so the investigation
 > methodology could be tested end to end without financial risk. The forensic technique, SQL
 > patterns, and governance reasoning are written to map directly onto enterprise environments
 > regardless of spend volume.
 
-**Restored 100% tag compliance visibility after tracing a provisioning-time governance gap to its root cause.** Applying 13+ years of reconciliation, audit-readiness, and multi-party compliance coordination from regulated real estate transactions to a cloud governance investigation using AWS-native forensic and detection tooling.
+**Restored 100% tag compliance visibility by tracing a provisioning-gap all the way back to its root cause.** I bring 13+ years of reconciliation and
+audit-readiness work from regulated real estate transactions into this cloud governance investigation, using AWS-native forensic and detection tooling 
+to find and fix the failure.
 
 ---
 
-## The 30-Second Version
+## The 30 Second Version
 
 - Identified a 17% cost allocation gap where $53 of $315 in monthly spend was invisible to Finance chargeback reporting
-- Proved root cause at creation time using CUR and CloudTrail `tagSpecificationSet` evidence — tags were never submitted with the API call, confirming a provisioning-time control failure rather than post-creation drift
-- Traced the gap to console-based provisioning outside governance controls, confirmed via IAM principal, UserAgent string, and session attribution chain
-- Designed an event-driven detection pipeline (CloudTrail → EventBridge → Lambda) with EC2 and S3 branching logic
-- Documented the full control-selection rationale, failure modes, and progressive enforcement roadmap as a governance case study
+- Proved root cause at creation time using CUR and CloudTrail `tagSpecificationSet` evidence. Tags were never submitted with the API call, confirming a
+provisioning time control failure rather than post creation drift
+- Traced the gap to console based provisioning outside governance controls, confirmed via IAM principal, UserAgent string, and session attribution chain
+- Designed an event driven detection pipeline (CloudTrail to EventBridge to Lambda) with EC2 and S3 branching logic
+- Documented the full control selection rationale, failure modes, and progressive enforcement roadmap as a governance case study
 
 ---
 
@@ -39,9 +42,13 @@ range, not a hard SLA.
 
 ## What This Is
 
-This is a financial reporting integrity problem, not a cost reduction problem. The spend was billed correctly. Finance could not see it, attribute it, or charge it back. Unattributed spend breaks chargeback accuracy, distorts forecast baselines, and produces Savings Plans recommendations sized against incomplete data. Restoring allocation coverage fixes all three.
+The spend here was billed correctly. Finance just couldn't see who it belonged to, which meant it couldn't be charged back or built into forecasts 
+properly. That's the actual problem: a reporting gap, not overspending.
 
-The investigation started at monthly reconciliation, confirmed billing accuracy, then used CUR and Athena SQL to isolate resources with NULL tags across all three required dimensions. CloudTrail forensics proved the tags were never submitted at creation time. That distinction matters: it separates a provisioning control failure from a configuration drift problem and identifies the exact control point that must be fixed.
+I started at monthly reconciliation and confirmed the invoice was accurate, so the issue had to be downstream in attribution. From there I used CUR and
+Athena SQL to isolate resources missing all three required tags, then confirmed with CloudTrail that those tags were never submitted at creation.
+Knowing that tags were missing from the start, rather than removed later, is what pointed to the actual fix: a provisioning-time control gap, not a 
+drift or cleanup problem.
 
 ---
 
