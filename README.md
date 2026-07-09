@@ -1,159 +1,103 @@
 # Cloud Governance Case Study: AWS Tag Compliance Investigation & Detection Pipeline
 
-> **Project context:** This is a self directed learning project completed in a personal AWS
-> sandbox account. It is not a professional engagement, paid consulting work, or output of a prior
-> employer. Cost figures are intentionally lab scaled ($315 in total spend) so the investigation
-> methodology could be tested end to end without financial risk. The forensic technique, SQL
-> patterns, and governance reasoning are written to map directly onto enterprise environments
-> regardless of spend volume.
+> **Project context:** This is a self-directed learning project completed in a personal AWS
+> sandbox account. It is not a professional engagement or output of a prior employer. Cost
+> figures are intentionally small ($315 in total spend) so I could test the full investigation
+> process without financial risk. The techniques and reasoning below are meant to translate to
+> real enterprise environments regardless of spend size.
 
-**Restored 100% tag compliance visibility by tracing a provisioning-gap all the way back to its root cause.** I bring 13+ years of reconciliation and
-audit-readiness work from regulated real estate transactions into this cloud governance investigation, using AWS-native forensic and detection tooling 
-to find and fix the failure.
-
----
-
-## The 30 Second Version
-
-- Identified a 17% cost allocation gap where $53 of $315 in monthly spend was invisible to Finance chargeback reporting
-- Proved root cause at creation time using CUR and CloudTrail `tagSpecificationSet` evidence. Tags were never submitted with the API call, confirming a
-provisioning time control failure rather than post creation drift
-- Traced the gap to console based provisioning outside governance controls, confirmed via IAM principal, UserAgent string, and session attribution chain
-- Designed an event driven detection pipeline (CloudTrail to EventBridge to Lambda) with EC2 and S3 branching logic
-- Documented the full control selection rationale, failure modes, and progressive enforcement roadmap as a governance case study
+**I traced a cloud cost allocation gap back to its root cause and built a detection pipeline to catch it going forward.** This project applies 
+reconciliation and audit-readiness habits from 13+ years in regulated real estate transactions to a cloud governance problem, using AWS-native tools to 
+investigate and fix it.
 
 ---
 
-## Results
+## The Short Version
 
-| Metric | Before | After |
-|---|---|---|
-| Allocation coverage | ~83% | 100% |
-| Mean time to detect | ~30 days | Low minute-level† |
-| Monthly unallocated spend | $53 | $0 |
-| Annualized attribution gap | $636 | $0 |
-| Chargeback accuracy | Incomplete | Restored to 100% |
-| Finance reconciliation effort | ~4 hrs/month | Materially reduced |
-
-†Event driven detection with near real time characteristics. CloudTrail delivery varies by region and load. Treat this as a typical observed 
-range, not a hard SLA.
+- Found a 17% cost allocation gap ($53 of $315 in monthly spend) invisible to Finance chargeback reporting
+- Used CUR and Athena SQL to isolate the affected resources, then CloudTrail to confirm the tags were never submitted at creation, not removed later
+- Traced the resource back to console-based provisioning with no attributable identity chain behind it
+- Built a detection pipeline (CloudTrail → EventBridge → Lambda) that flags missing tags on new resources and alerts Finance and the resource owner
+- Documented the reasoning behind choosing detection over immediate enforcement, given there was no existing compliance baseline
 
 ---
 
-## What This Is
+## What Happened
 
-The spend here was billed correctly. Finance just couldn't see who it belonged to, which meant it couldn't be charged back or built into forecasts 
-properly. That's the actual problem: a reporting gap, not overspending.
+The spend was billed correctly — Finance just couldn't tell whose it was. That's a reporting problem, not overspending, but it still breaks chargeback, 
+forecasting, and any commitment planning built on that data.
 
-I started at monthly reconciliation and confirmed the invoice was accurate, so the issue had to be downstream in attribution. From there I used CUR and
-Athena SQL to isolate resources missing all three required tags, then confirmed with CloudTrail that those tags were never submitted at creation.
-Knowing that tags were missing from the start, rather than removed later, is what pointed to the actual fix: a provisioning-time control gap, not a 
-drift or cleanup problem.
+I confirmed the invoice was accurate first, which meant the issue was downstream in attribution.
 
----
+![Invoice validation confirming $315 total spend](screenshots/01%20-%20invoice-total-315.png)
+*Confirming the invoice matched CUR totals before looking further.*
 
-## Architecture
+Using CUR and Athena, I found a resource with all three required tags missing at once — not one tag, all three, on every billing line. That pattern 
+ruled out someone just forgetting a tag.
 
-```
-EC2 RunInstances / S3 CreateBucket / S3 PutBucketTagging
-             │
-             ▼
-       AWS CloudTrail
-    (all API-level events)
-             │
-             ▼
-    Amazon EventBridge
-  (finops-tag-compliance-monitor)
-             │
-             ▼
-        AWS Lambda
-   (finops-tag-validator)
-   Checks: Environment · Project · Owner
-        │              │
-        ▼              ▼
-  Slack: Finance   Slack: Owner
-     Channel        Direct DM
-```
+![CUR query result showing NULL Environment, Project, and Owner tags](screenshots/02%20-%20cur-resource-isolation-missing-allocation-tags.png)
+*The resource verification query, showing all three tags returning NULL simultaneously.*
 
-Event driven detection validates required tags at or near resource creation and routes violations to Finance and the responsible owner. Service 
-specific logic is applied where tagging behaviour differs across AWS services.
+![CUR resource isolation query and result](screenshots/03%20-%20cloudtrail-forensics-runinstances-missing-tags-cli-launch.png)
+*The underlying query used to isolate this resource in Athena.*
 
----
+I moved to CloudTrail to find out why. The event history for this resource confirmed the launch details, IAM principal, and timestamp.
 
-## Investigation Flow
+![CloudTrail event history showing RunInstances event](screenshots/03a%20-%20cloudtrail-event-history-runinstances.png)
+*CloudTrail record of the RunInstances event, confirming a console launch.*
 
-**Phase 1: Invoice validation.** Confirmed billing was accurate before investigating allocation. The failure was downstream in the attribution 
-layer, not in the invoice.
+The `tagSpecificationSet` on the original API call showed only a `Name` tag was ever submitted. The others were never there to begin with.
 
-**Phase 2: CUR analysis.** Used Athena SQL against CUR to identify resources with NULL tags across all three required columns simultaneously. The 
-pattern of all three tags absent on every billing line item for the same resource ruled out accidental omission and shifted the investigation to 
-provisioning path forensics.
+![CloudTrail tagSpecificationSet showing only the Name tag present](screenshots/03b%20-%20cloudtrail-runinstances-json-cli-useragent.png)
+*The tag specification submitted at creation, confirming Environment, Project, and Owner were never included.*
 
-**Phase 3: CloudTrail forensics.** Filtered CloudTrail to the `RunInstances` event for the identified resource. The `tagSpecificationSet` 
-contained only the `Name` tag. `Environment`, `Project`, and `Owner` were never submitted with the API call. A targeted `AssumeRole` query scoped 
-to the principal ARN, bounded to the 30 minute pre incident window, returned zero results. No role assumption chain, no federation context, no 
-enforced identity boundary at the provisioning layer.
+I also checked whether the principal that created the resource had any traceable identity chain behind it. It didn't — no role assumption, no 
+federation context. That's a separate finding from the tagging gap, but it matters for the same reason: without it, there's no way to route 
+accountability back to a team.
 
-**Phase 4: Scope expansion.** Confirmed the issue was systemic across EC2 and S3. RDS was fully compliant. Partial tagging in S3 produced the same
-Finance invisible outcome as no tagging.
+Expanding the check to S3 confirmed the issue wasn't isolated to one resource.
+
+![S3 tag compliance audit showing NULL Environment tags](screenshots/04%20-%20cur-s3-tag-compliance-audit.png)
+*Two S3 buckets missing the required Environment tag, despite having Project and Owner present.*
 
 ---
 
-## Root Cause
+## What I Built
 
-**Primary failure:** No preventive tagging control existed at resource creation time. No SCP, IAM condition key, IaC guardrail, or curated 
-provisioning interface enforced required tags before the resource reached the billing layer.
+A detection pipeline using CloudTrail, EventBridge, and Lambda. New EC2 and S3 resources get checked against required tags (`Environment`, `Project`, 
+`Owner`) shortly after creation, and violations route to a Finance channel and the resource owner.
 
-**Contributing factor:** Use of non attributable principals removed enforceable ownership mapping. Without a traceable identity chain, post 
-incident ownership cannot be reliably assigned and targeted enforcement cannot be designed around known roles. In a production environment this 
-finding generates two separate escalation paths — the allocation gap goes to Finance as a FinOps report, and the Root usage finding is escalated 
-to Security as a distinct identity governance incident.
+![Lambda function finops-tag-validator showing REQUIRED_TAGS list, event parsing logic for RunInstances and CreateBucket, missing tag 
+detection, and alert payload construction](screenshots/05b%20-%20lambda-finops-tag-validator-code.png)
+*End-to-end flow: resource creation → CloudTrail → EventBridge → Lambda → Slack alerts.*
 
-**Design decision:** Automated tag back remediation was evaluated and rejected. Default tags produce chargeback reports that assign cost to the 
-wrong team, distort showback data, and corrupt forecast baselines. The safer approach was to surface the gap accurately and alert the responsible
-principal.
+![EventBridge rule configuration](screenshots/05a-eventbridge-rule.png)
+*The EventBridge rule matching RunInstances and S3 tagging events.*
 
----
+EC2 and S3 needed different logic since S3 doesn't accept tags inline at creation the way EC2 does — an early version of this pipeline flagged every 
+new S3 bucket as noncompliant before I caught that and fixed it.
 
-## Control Approach
+![Lambda function code for tag validation](screenshots/05b%20-%20lambda-finops-tag-validator-code.png)
+*The Lambda function checking for required tags and constructing the alert payload.*
 
-Detection was chosen as the first control because no compliance baseline existed. Enforcement before a baseline breaks CI/CD pipelines and managed
-service roles in ways that are harder to govern than the original problem. The intended progression is:
+![Lambda runtime settings](screenshots/05b-ii%20-%20lambda-settings.png)
+*Lambda deployment configuration.*
 
-1. **Detect** (implemented): EventBridge and Lambda catch violations within minutes and alert Finance and the resource owner
-2. **Baseline**: Tag compliance tracked as a first class FinOps KPI
-3. **Stabilize**: MTTR and repeat violations measured by principal
-4. **Enforce**: SCP guardrails applied after compliance exceeds 95%
+I chose detection over immediate enforcement (like blocking non-tagged resources outright) because there was no existing compliance baseline. Blocking 
+deployments before you know what's actually out there tends to break more things than it fixes.
 
-Scoped enforcement can be introduced early for high risk scenarios. Broad enforcement across existing workloads follows once compliance stabilizes.
+![Lambda test execution result showing the alert firing](screenshots/05c-lambda-test-result.png)
+*Test run confirming the pipeline correctly detects and alerts on a missing-tag violation.*
 
 ---
 
 ## Key Technologies
 
-| Layer | Technology |
-|---|---|
-| Billing data | AWS Cost and Usage Report (CUR) |
-| Query engine | Amazon Athena |
-| Forensics | AWS CloudTrail |
-| Event capture | Amazon EventBridge |
-| Tag validation | AWS Lambda (Python 3.12) |
-| Governance | AWS Organizations Tag Policies and SCP |
-| Alerting | Slack (Finance channel and resource owner DM) |
-
----
-
-## Forward KPIs
-
-| Metric | Target | Measurement Method |
-|---|---|---|
-| MTTR | Under 24 hrs | Time from alert to tag compliance restored |
-| Repeat violation rate | Below 10% in 30 days | Same principal in repeated violations |
-| Compliance trend | 95% within 60 days | Tagged spend divided by total spend |
-| Tag validity rate | 90% within 60 days | Valid tag values, not just presence |
+AWS Cost and Usage Report (CUR), Amazon Athena, AWS CloudTrail, Amazon EventBridge, AWS Lambda (Python), AWS Organizations Tag Policies, Slack alerting.
 
 ---
 
 ## Full Technical Report
 
-Full investigation details including SQL queries, CloudTrail evidence, Lambda logic, IAM conditions, failure modes, and architecture are available in the main [technical investigation report](https://github.com/AthertHa-FinOps/aws-finops-cost-allocation-investigation).
+The complete investigation, including SQL queries, full CloudTrail evidence, Lambda logic, and the reasoning behind each decision, is in the [full 
+technical report](https://github.com/AthertHa-FinOps/aws-finops-cost-allocation-investigation).
